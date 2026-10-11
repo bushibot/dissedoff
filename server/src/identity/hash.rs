@@ -39,6 +39,29 @@ impl ServerSalt {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Load the salt from `path` if it exists, otherwise generate a fresh one
+    /// and persist it there. This is the "auto-config, never hand-edited"
+    /// first-boot behavior the plan requires.
+    pub fn load_or_generate(path: &std::path::Path) -> std::io::Result<Self> {
+        if let Ok(bytes) = std::fs::read(path) {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                return Ok(Self(arr));
+            }
+            tracing::warn!(
+                "server salt file at {} has unexpected length, regenerating",
+                path.display()
+            );
+        }
+        let salt = Self::generate();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, salt.as_bytes())?;
+        Ok(salt)
+    }
 }
 
 /// Derive the externally-visible public user id for `internal_user_id` on the

@@ -1,25 +1,15 @@
-mod identity;
-mod voice;
-
-use axum::{routing::get, Json, Router};
-use serde_json::json;
+use dissedoff_server::config::Config;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let app = Router::new().route("/health", get(health));
+    let cfg = Config::from_env();
+    let (app, _state) = dissedoff_server::build_app(&cfg).await;
 
-    let addr = "0.0.0.0:8080";
-    tracing::info!("dissedoff-server listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(addr)
+    tracing::info!("dissedoff-server listening on {}", cfg.bind_addr);
+    let listener = tokio::net::TcpListener::bind(&cfg.bind_addr)
         .await
         .expect("failed to bind listen address");
-    axum::serve(listener, app)
-        .await
-        .expect("server error");
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok", "service": "dissedoff-server" }))
+    axum::serve(listener, app).await.expect("server error");
 }
