@@ -1,0 +1,10 @@
+[package]
+name = "dissedoff-permissions"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+description = "Role/permission bitfield model shared by server and clients, so clients can predict UI affordances without a round trip. Independent bit layout, not copied from any other platform."
+
+[dependencies]
+serde = { workspace = true }
+bitflags = "2"
