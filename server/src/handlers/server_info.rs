@@ -2,20 +2,11 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use dissedoff_permissions::Permissions;
-use serde::{Deserialize, Serialize};
+use dissedoff_protocol::rest::{ServerInfoResponse, UpdateServerInfoRequest};
 
 use super::{api_error, auth_error_response};
 use crate::auth::authenticate;
 use crate::state::AppState;
-
-#[derive(Serialize)]
-pub struct ServerInfoResponse {
-    pub public_server_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub visibility: String,
-    pub federation_mode: String,
-}
 
 pub async fn get_server_info(
     State(state): State<AppState>,
@@ -34,13 +25,6 @@ pub async fn get_server_info(
         visibility: row.3,
         federation_mode: row.4,
     }))
-}
-
-#[derive(Deserialize)]
-pub struct UpdateServerInfoRequest {
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub visibility: Option<String>,
 }
 
 pub async fn update_server_info(

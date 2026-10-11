@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod rest;
+
 /// A single message sent over the real-time gateway WebSocket, in either direction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {

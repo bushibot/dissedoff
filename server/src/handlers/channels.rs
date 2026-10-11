@@ -2,8 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use dissedoff_permissions::Permissions;
+use dissedoff_protocol::rest::{
+    ChannelResponse, CreateChannelRequest, CreateMessageRequest, ListMessagesQuery, MessageResponse,
+};
 use dissedoff_protocol::{Envelope, EventType};
-use serde::{Deserialize, Serialize};
 
 use super::{api_error, auth_error_response};
 use crate::auth::authenticate;
@@ -11,31 +13,27 @@ use crate::db::now_unix;
 use crate::identity::hash::public_user_id;
 use crate::state::AppState;
 
-#[derive(Serialize, sqlx::FromRow)]
-pub struct ChannelResponse {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub parent_id: Option<String>,
-    pub position: i32,
-}
-
 pub async fn list_channels(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ChannelResponse>>, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
-    let channels: Vec<ChannelResponse> = sqlx::query_as(
+    let rows: Vec<(String, String, String, Option<String>, i32)> = sqlx::query_as(
         "SELECT id, name, kind, parent_id, position FROM channels ORDER BY position ASC",
     )
     .fetch_all(&state.db)
     .await
     .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
-    Ok(Json(channels))
-}
 
-#[derive(Deserialize)]
-pub struct CreateChannelRequest {
-    pub name: String,
-    pub kind: String, // "text" | "voice" | "category"
+    let channels = rows
+        .into_iter()
+        .map(|(id, name, kind, parent_id, position)| ChannelResponse {
+            id,
+            name,
+            kind,
+            parent_id,
+            position,
+        })
+        .collect();
+    Ok(Json(channels))
 }
 
 pub async fn create_channel(
@@ -76,22 +74,6 @@ pub async fn create_channel(
     });
 
     Ok(Json(response))
-}
-
-#[derive(Serialize)]
-pub struct MessageResponse {
-    pub id: String,
-    pub channel_id: String,
-    pub author_public_id: String,
-    pub author_username: String,
-    pub content: String,
-    pub created_at: i64,
-}
-
-#[derive(Deserialize)]
-pub struct ListMessagesQuery {
-    pub before: Option<String>,
-    pub limit: Option<i64>,
 }
 
 pub async fn list_messages(
@@ -146,11 +128,6 @@ pub async fn list_messages(
         .collect();
 
     Ok(Json(messages))
-}
-
-#[derive(Deserialize)]
-pub struct CreateMessageRequest {
-    pub content: String,
 }
 
 pub async fn create_message(

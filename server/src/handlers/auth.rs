@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use dissedoff_protocol::rest::{AuthResponse, LoginRequest, RegisterRequest};
 use uuid::Uuid;
 
 use super::api_error;
@@ -13,22 +13,11 @@ use crate::state::AppState;
 const SESSION_LIFETIME_SECS: i64 = 60 * 60 * 24 * 30; // 30 days
 const MIN_PASSWORD_LEN: usize = 8;
 
-#[derive(Deserialize)]
-pub struct RegisterRequest {
-    /// Optional per the plan's "all registration fields optional except the
-    /// hashed user id" requirement — if omitted, a default handle is
-    /// generated. Full per-server-configurable required-fields policy is not
-    /// yet implemented; this is the first, partial step toward it.
-    pub username: Option<String>,
-    pub password: String,
-}
-
-#[derive(Serialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub public_id: String,
-    pub username: String,
-}
+// `RegisterRequest.username` (shared via dissedoff_protocol::rest) is
+// Optional per the plan's "all registration fields optional except the
+// hashed user id" requirement — if omitted, a default handle is generated
+// below. Full per-server-configurable required-fields policy is not yet
+// implemented; this is the first, partial step toward it.
 
 pub async fn register(
     State(state): State<AppState>,
@@ -89,12 +78,6 @@ pub async fn register(
         public_id: public_user_id(&state.salt, internal_id),
         username,
     }))
-}
-
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub username: String,
-    pub password: String,
 }
 
 pub async fn login(
