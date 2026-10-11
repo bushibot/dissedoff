@@ -2,6 +2,7 @@ pub mod auth;
 pub mod channels;
 pub mod gateway;
 pub mod server_info;
+pub mod voice;
 
 use axum::http::StatusCode;
 use axum::Json;

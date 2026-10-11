@@ -16,6 +16,8 @@ async fn spawn_test_server() -> String {
         data_dir: data_dir.keep(),
         bind_addr: "127.0.0.1:0".to_string(),
         default_server_name: "Test Server".to_string(),
+        voice_enabled: false,
+        voice_port: 0,
     };
 
     let (app, _state) = dissedoff_server::build_app(&cfg).await;

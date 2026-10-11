@@ -35,6 +35,7 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::channels::list_messages).post(handlers::channels::create_message),
         )
         .route("/api/v1/gateway", get(handlers::gateway::gateway_upgrade))
+        .route("/api/v1/voice/status", get(handlers::voice::voice_status))
         .with_state(state)
 }
 
@@ -53,7 +54,19 @@ pub async fn build_app(cfg: &Config) -> (Router, AppState) {
 
     let salt = db::load_server_salt(&cfg.salt_path()).expect("failed to load/generate server salt");
 
-    let state = new_app_state(pool, salt);
+    let voice_supervisor = if cfg.voice_enabled {
+        match voice::murmur_supervisor::MurmurSupervisor::start(&cfg.data_dir, cfg.voice_port) {
+            Ok(supervisor) => Some(supervisor),
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start voice supervisor — voice will be unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let state = new_app_state(pool, salt, voice_supervisor);
     let router = build_router(state.clone());
     (router, state)
 }

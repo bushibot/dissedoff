@@ -10,7 +10,12 @@ COPY server ./server
 RUN cargo build --release -p dissedoff-server
 
 FROM debian:stable-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# mumble-server provides the actual Murmur binary (installed as
+# /usr/bin/mumble-server), bundled here so voice ships in this same single
+# container — launched and supervised by dissedoff-server itself, never
+# started via mumble-server's own systemd unit.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates mumble-server \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/target/release/dissedoff-server /usr/local/bin/dissedoff-server
 
@@ -18,5 +23,6 @@ ENV DISSEDOFF_DATA_DIR=/data
 ENV DISSEDOFF_BIND_ADDR=0.0.0.0:8080
 VOLUME ["/data"]
 EXPOSE 8080
+EXPOSE 64738
 
 ENTRYPOINT ["/usr/local/bin/dissedoff-server"]
