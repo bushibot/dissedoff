@@ -7,6 +7,7 @@ pub mod snowflake;
 pub mod state;
 pub mod voice;
 
+use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
@@ -14,11 +15,14 @@ use serde_json::json;
 use config::Config;
 use state::{new_app_state, AppState};
 
+const ADMIN_UI_HTML: &str = include_str!("../web/app.html");
+
 /// Build the router for a server that has already finished DB/salt setup.
 /// Exposed separately from [`build_app`] so integration tests can inspect or
 /// reuse `state` after building the router.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(admin_ui))
         .route("/health", get(health))
         .route("/api/v1/auth/register", post(handlers::auth::register))
         .route("/api/v1/auth/login", post(handlers::auth::login))
@@ -73,4 +77,11 @@ pub async fn build_app(cfg: &Config) -> (Router, AppState) {
 
 async fn health() -> Json<serde_json::Value> {
     Json(json!({ "status": "ok", "service": "dissedoff-server" }))
+}
+
+/// Single-file web UI (login/register, channels, chat, voice status) baked
+/// into the binary at compile time — no separate static-asset deployment
+/// step, and it works the moment the server is reachable over HTTP.
+async fn admin_ui() -> Html<&'static str> {
+    Html(ADMIN_UI_HTML)
 }

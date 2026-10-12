@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dissedoff</title>
+<style>
+  :root {
+    --bg: #1e1f26; --panel: #262832; --panel-2: #2e3040; --text: #e6e6ea;
+    --muted: #9a9ba8; --accent: #7289da; --danger: #e05c5c; --border: #3a3c4a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+  #auth-screen { display: flex; align-items: center; justify-content: center; height: 100vh; }
+  .card { background: var(--panel); padding: 2rem; border-radius: 8px; width: 320px; }
+  .card h1 { margin-top: 0; font-size: 1.3rem; }
+  .card input { width: 100%; padding: 0.5rem; margin-bottom: 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+  .card button { width: 100%; padding: 0.55rem; background: var(--accent); border: none; border-radius: 4px; color: white; cursor: pointer; font-weight: 600; }
+  .card button:hover { opacity: 0.9; }
+  .card .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
+  .card .switch { text-align: center; margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
+  #app { display: none; height: 100vh; }
+  .layout { display: flex; height: 100%; }
+  .sidebar { width: 220px; background: var(--panel); display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  .server-header { padding: 0.9rem; border-bottom: 1px solid var(--border); }
+  .server-header .name { font-weight: 700; }
+  .server-header .desc { color: var(--muted); font-size: 0.8rem; margin-top: 0.2rem; }
+  .channels { flex: 1; overflow-y: auto; padding: 0.5rem; }
+  .channel { padding: 0.4rem 0.6rem; border-radius: 4px; cursor: pointer; color: var(--muted); font-size: 0.92rem; }
+  .channel.active { background: var(--panel-2); color: var(--text); }
+  .channel:hover { background: var(--panel-2); }
+  .new-channel { display: flex; gap: 0.3rem; padding: 0.5rem; }
+  .new-channel input { flex: 1; min-width: 0; padding: 0.35rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.85rem; }
+  .new-channel button { padding: 0.35rem 0.5rem; background: var(--accent); border: none; border-radius: 4px; color: white; cursor: pointer; }
+  .voice-status { padding: 0.6rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--muted); }
+  .voice-status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.35rem; }
+  .user-footer { padding: 0.6rem; border-top: 1px solid var(--border); font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; }
+  .user-footer button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.78rem; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .main-header { padding: 0.8rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+  .messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .msg .author { font-weight: 700; margin-right: 0.4rem; }
+  .msg .time { color: var(--muted); font-size: 0.72rem; margin-left: 0.4rem; }
+  .composer { padding: 0.8rem 1rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; }
+  .composer input { flex: 1; padding: 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+  .composer button { padding: 0.6rem 1rem; background: var(--accent); border: none; border-radius: 4px; color: white; cursor: pointer; }
+  .banner { padding: 0.4rem 1rem; font-size: 0.8rem; background: #3a2d2d; color: #e0a0a0; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="auth-screen">
+  <div class="card">
+    <h1 id="auth-title">Sign in to Dissedoff</h1>
+    <input id="auth-server" placeholder="Server URL (e.g. http://127.0.0.1:8080)" />
+    <input id="auth-username" placeholder="Username (leave blank to auto-generate, register only)" />
+    <input id="auth-password" type="password" placeholder="Password (min 8 characters)" />
+    <button id="auth-submit">Sign in</button>
+    <div class="error" id="auth-error"></div>
+    <div class="switch" id="auth-switch">Need an account? Register instead</div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="layout">
+    <div class="sidebar">
+      <div class="server-header">
+        <div class="name" id="server-name">...</div>
+        <div class="desc" id="server-desc"></div>
+      </div>
+      <div class="channels" id="channel-list"></div>
+      <div class="new-channel">
+        <input id="new-channel-name" placeholder="new channel" />
+        <button id="new-channel-submit">+</button>
+      </div>
+      <div class="voice-status" id="voice-status">voice: checking...</div>
+      <div class="user-footer">
+        <span id="whoami"></span>
+        <button id="logout-btn">sign out</button>
+      </div>
+    </div>
+    <div class="main">
+      <div class="main-header" id="main-header">#</div>
+      <div class="banner hidden" id="banner"></div>
+      <div class="messages" id="messages"></div>
+      <div class="composer">
+        <input id="composer-input" placeholder="Message..." autocomplete="off" />
+        <button id="composer-send">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Dissedoff web client/admin UI — talks only to the public REST+WS API
+// documented in crates/protocol/src/rest.rs and lib.rs. No private endpoints.
+(function () {
+  const state = {
+    serverUrl: localStorage.getItem('dissedoff_server_url') || window.location.origin,
+    token: localStorage.getItem('dissedoff_token') || null,
+    username: localStorage.getItem('dissedoff_username') || null,
+    mode: 'login',
+    channels: [],
+    activeChannel: null,
+    ws: null,
+  };
+
+  const el = (id) => document.getElementById(id);
+
+  function api(path, opts = {}) {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+    return fetch(state.serverUrl + path, Object.assign({}, opts, { headers })).then(async (res) => {
+      if (!res.ok) {
+        let body;
+        try { body = await res.json(); } catch (_) { body = { message: res.statusText }; }
+        throw new Error(body.message || `HTTP ${res.status}`);
+      }
+      if (res.status === 204) return null;
+      return res.json();
+    });
+  }
+
+  function showAuthError(msg) { el('auth-error').textContent = msg || ''; }
+
+  el('auth-switch').addEventListener('click', () => {
+    state.mode = state.mode === 'login' ? 'register' : 'login';
+    el('auth-title').textContent = state.mode === 'login' ? 'Sign in to Dissedoff' : 'Register a new account';
+    el('auth-submit').textContent = state.mode === 'login' ? 'Sign in' : 'Register';
+    el('auth-switch').textContent = state.mode === 'login' ? 'Need an account? Register instead' : 'Already have an account? Sign in';
+    showAuthError('');
+  });
+
+  el('auth-submit').addEventListener('click', async () => {
+    showAuthError('');
+    const serverUrl = el('auth-server').value.trim() || state.serverUrl;
+    const username = el('auth-username').value.trim();
+    const password = el('auth-password').value;
+    if (password.length < 8) { showAuthError('password must be at least 8 characters'); return; }
+    state.serverUrl = serverUrl.replace(/\/$/, '');
+    try {
+      const path = state.mode === 'login' ? '/api/v1/auth/login' : '/api/v1/auth/register';
+      const body = state.mode === 'login'
+        ? { username, password }
+        : { username: username || null, password };
+      const auth = await api(path, { method: 'POST', body: JSON.stringify(body) });
+      state.token = auth.token;
+      state.username = auth.username;
+      localStorage.setItem('dissedoff_server_url', state.serverUrl);
+      localStorage.setItem('dissedoff_token', state.token);
+      localStorage.setItem('dissedoff_username', state.username);
+      enterApp();
+    } catch (e) {
+      showAuthError(e.message);
+    }
+  });
+
+  el('auth-server').value = state.serverUrl;
+
+  el('logout-btn').addEventListener('click', () => {
+    localStorage.removeItem('dissedoff_token');
+    localStorage.removeItem('dissedoff_username');
+    if (state.ws) state.ws.close();
+    window.location.reload();
+  });
+
+  function banner(msg) {
+    const b = el('banner');
+    if (!msg) { b.classList.add('hidden'); return; }
+    b.textContent = msg;
+    b.classList.remove('hidden');
+  }
+
+  async function loadServerInfo() {
+    try {
+      const info = await api('/api/v1/server');
+      el('server-name').textContent = info.name;
+      el('server-desc').textContent = info.description || '';
+    } catch (e) {
+      el('server-name').textContent = '(unavailable)';
+    }
+  }
+
+  async function loadVoiceStatus() {
+    try {
+      const v = await api('/api/v1/voice/status');
+      const dot = v.enabled && v.running ? '#43b581' : v.enabled ? '#e0a040' : '#72767d';
+      el('voice-status').innerHTML = `<span class="dot" style="background:${dot}"></span>voice: ${v.enabled ? (v.running ? `running on port ${v.port}` : 'starting...') : 'disabled'}`;
+    } catch (e) {
+      el('voice-status').textContent = 'voice: unavailable';
+    }
+  }
+
+  async function loadChannels() {
+    state.channels = await api('/api/v1/channels');
+    const list = el('channel-list');
+    list.innerHTML = '';
+    if (!state.channels.length) {
+      list.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:0.4rem 0.6rem;">no channels yet</div>';
+      return;
+    }
+    if (!state.activeChannel) state.activeChannel = state.channels[0];
+    state.channels.forEach((c) => {
+      const div = document.createElement('div');
+      div.className = 'channel' + (state.activeChannel && c.id === state.activeChannel.id ? ' active' : '');
+      div.textContent = '# ' + c.name;
+      div.addEventListener('click', () => { state.activeChannel = c; refreshChannelView(); });
+      list.appendChild(div);
+    });
+  }
+
+  el('new-channel-submit').addEventListener('click', async () => {
+    const input = el('new-channel-name');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await api('/api/v1/channels', { method: 'POST', body: JSON.stringify({ name, kind: 'text' }) });
+      input.value = '';
+      await loadChannels();
+      refreshChannelView();
+    } catch (e) {
+      banner(`could not create channel: ${e.message}`);
+    }
+  });
+
+  function renderMessage(m) {
+    const div = document.createElement('div');
+    div.className = 'msg';
+    const time = new Date(m.created_at * 1000).toLocaleTimeString();
+    div.innerHTML = `<span class="author">${escapeHtml(m.author_username)}</span><span class="time">${time}</span><br>${escapeHtml(m.content)}`;
+    return div;
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  async function refreshChannelView() {
+    if (!state.activeChannel) {
+      el('main-header').textContent = 'no channel selected';
+      el('messages').innerHTML = '';
+      return;
+    }
+    el('main-header').textContent = '# ' + state.activeChannel.name;
+    document.querySelectorAll('.channel').forEach((d, i) => {
+      d.classList.toggle('active', state.channels[i] && state.channels[i].id === state.activeChannel.id);
+    });
+    try {
+      const history = await api(`/api/v1/channels/${state.activeChannel.id}/messages`);
+      const box = el('messages');
+      box.innerHTML = '';
+      history.slice().reverse().forEach((m) => box.appendChild(renderMessage(m)));
+      box.scrollTop = box.scrollHeight;
+      banner('');
+    } catch (e) {
+      banner(`could not load messages: ${e.message}`);
+    }
+  }
+
+  el('composer-send').addEventListener('click', sendMessage);
+  el('composer-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+  async function sendMessage() {
+    const input = el('composer-input');
+    const content = input.value.trim();
+    if (!content || !state.activeChannel) return;
+    try {
+      await api(`/api/v1/channels/${state.activeChannel.id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      });
+      input.value = '';
+    } catch (e) {
+      banner(`could not send: ${e.message}`);
+    }
+  }
+
+  function connectGateway() {
+    const wsUrl = state.serverUrl.replace(/^http/, 'ws') + '/api/v1/gateway?token=' + encodeURIComponent(state.token);
+    const ws = new WebSocket(wsUrl);
+    state.ws = ws;
+    ws.onmessage = (ev) => {
+      let envelope;
+      try { envelope = JSON.parse(ev.data); } catch (_) { return; }
+      if (envelope.t === 'HELLO') {
+        const interval = envelope.d.heartbeat_interval_ms || 30000;
+        ws._hb = setInterval(() => {
+          ws.send(JSON.stringify({ t: 'HEARTBEAT', seq: 0, d: null }));
+        }, interval);
+      } else if (envelope.t === 'MESSAGE_CREATE') {
+        const m = envelope.d;
+        if (state.activeChannel && m.channel_id === state.activeChannel.id) {
+          const box = el('messages');
+          box.appendChild(renderMessage(m));
+          box.scrollTop = box.scrollHeight;
+        }
+      } else if (envelope.t === 'CHANNEL_CREATE') {
+        loadChannels();
+      }
+    };
+    ws.onclose = () => { if (ws._hb) clearInterval(ws._hb); };
+  }
+
+  async function enterApp() {
+    el('auth-screen').style.display = 'none';
+    el('app').style.display = 'block';
+    el('whoami').textContent = state.username;
+    await loadServerInfo();
+    await loadVoiceStatus();
+    await loadChannels();
+    await refreshChannelView();
+    connectGateway();
+    setInterval(loadVoiceStatus, 15000);
+  }
+
+  if (state.token && state.username) {
+    enterApp().catch(() => {
+      localStorage.removeItem('dissedoff_token');
+      window.location.reload();
+    });
+  }
+})();
+</script>
+</body>
+</html>

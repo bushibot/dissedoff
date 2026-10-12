@@ -1,0 +1,104 @@
+name: Release
+
+# Builds and publishes everything a self-hoster or a client user downloads:
+# a multi-platform Docker image (the server, voice included) on GHCR, plus
+# native dissedoff-server/dissedoff-cli binaries for Linux, macOS, and
+# Windows, all attached to a GitHub Release. Runs only when a version tag
+# is pushed, so day-to-day commits don't trigger release builds.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  docker:
+    name: Build and push server image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+
+  binaries:
+    name: Build binaries (${{ matrix.os }})
+    needs: []
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x86_64
+            ext: ""
+            archive: tar.gz
+          - os: macos-latest
+            artifact: macos-aarch64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            artifact: windows-x86_64
+            ext: ".exe"
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binaries
+        run: cargo build --release -p dissedoff-server -p dissedoff-cli
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="dissedoff-${{ github.ref_name }}-${{ matrix.artifact }}"
+          mkdir "$STAGE"
+          cp target/release/dissedoff-server "$STAGE"/
+          cp target/release/dissedoff-cli "$STAGE"/
+          cp README.md PLAN.md LICENSE-AGPL LICENSE-APACHE "$STAGE"/
+          tar -czf "$STAGE.tar.gz" "$STAGE"
+          sha256sum "$STAGE.tar.gz" > "$STAGE.tar.gz.sha256"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $stage = "dissedoff-${{ github.ref_name }}-${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Path $stage
+          Copy-Item target/release/dissedoff-server.exe $stage/
+          Copy-Item target/release/dissedoff-cli.exe $stage/
+          Copy-Item README.md,PLAN.md,LICENSE-AGPL,LICENSE-APACHE $stage/
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          Get-FileHash "$stage.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $stage.zip" } | Out-File -Encoding ascii "$stage.zip.sha256"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dissedoff-*.tar.gz
+            dissedoff-*.tar.gz.sha256
+            dissedoff-*.zip
+            dissedoff-*.zip.sha256
+          fail_on_unmatched_files: false
+          generate_release_notes: true

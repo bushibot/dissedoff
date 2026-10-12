@@ -1,12 +1,15 @@
 # Single-container build: everything needed to self-host a Dissedoff server
-# lands in one image. Voice (Murmur, bundled as a managed child process) is
-# added here in Phase 2 — this Phase 1 image is text/chat only.
+# lands in one image, including Murmur (voice) as a bundled, supervised
+# child process — see src/voice/murmur_supervisor.rs.
 
 FROM rust:1-slim AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY server ./server
+COPY apps ./apps
+# `apps/cli` is a workspace member, so cargo needs its manifest to resolve
+# the workspace even though only dissedoff-server is built into this image.
 RUN cargo build --release -p dissedoff-server
 
 FROM debian:stable-slim AS runtime
