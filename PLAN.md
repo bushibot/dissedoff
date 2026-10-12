@@ -123,11 +123,17 @@ standard workaround and directly unblocks "charge a few bucks for the iOS client
    two independently-run servers can register and chat with zero manual config.
    **Status: server side done and tested (auth, roles/permissions, channels, messages, real-time
    gateway, SQLite). A browser-based web UI (login/register, channels, live chat, voice status)
-   is now baked into the server binary and served at `/` — real and tested, but it is a plain
-   HTML/JS page hitting the REST+WS API, not a native app. No native desktop (Tauri) or mobile
-   client exists yet — only the web UI and a terminal reference client (`apps/cli`). The "two
-   people" exit criterion has only been exercised as one operator running two accounts/processes,
-   plus one fully automated two-account test — not by two actual separate people yet.**
+   is baked into the server binary and served at `/`. A native desktop app (`apps/desktop`, Tauri
+   v2) now also exists, wrapping that same UI — verified for real on Linux (launched under a
+   virtual display, driven with simulated keyboard/mouse input, screenshotted at each step:
+   failed login, registration, channel creation, sending/receiving a chat message). macOS/Windows
+   desktop builds are wired into the release pipeline (`tauri-apps/tauri-action` in
+   `.github/workflows/release.yml`) but not yet confirmed by an actual run on those OSes. No
+   mobile client exists. The native helper process for push-to-talk/overlay (see "Clients" above)
+   is not built — today's desktop app is a plain webview with the same input limitations as the
+   browser. The "two people" exit criterion has only been exercised as one operator running
+   multiple accounts/processes, plus one fully automated two-account test — not by two actual
+   separate people yet.**
 2. **Voice integration** — Murmur supervisor, auto-cert/config, control-API proxy, voice UI. Exit:
    join voice with zero Mumble-specific setup, ever.
    **Status: partial. Murmur runs embedded, auto-configures certs/config, and crash-restarts —

@@ -1,10 +1,16 @@
 name: Release
 
 # Builds and publishes everything a self-hoster or a client user downloads:
-# a multi-platform Docker image (the server, voice included) on GHCR, plus
-# native dissedoff-server/dissedoff-cli binaries for Linux, macOS, and
-# Windows, all attached to a GitHub Release. Runs only when a version tag
-# is pushed, so day-to-day commits don't trigger release builds.
+# a multi-platform Docker image (the server, voice included) on GHCR, native
+# dissedoff-server/dissedoff-cli binaries, and installable desktop app
+# bundles (AppImage+.deb, .dmg, .msi) for Linux, macOS, and Windows, all
+# attached to a GitHub Release. Runs only when a version tag is pushed, so
+# day-to-day commits don't trigger release builds.
+#
+# The desktop bundles are unsigned (no Apple notarization, no Windows
+# code-signing cert yet — both are real recurring costs, see PLAN.md). That
+# means Gatekeeper/SmartScreen will warn on first launch; this is a known,
+# documented limitation, not a build bug.
 
 on:
   push:
@@ -102,3 +108,37 @@ jobs:
             dissedoff-*.zip.sha256
           fail_on_unmatched_files: false
           generate_release_notes: true
+
+  desktop:
+    name: Build desktop app (${{ matrix.os }})
+    # Runs after `binaries` so the GitHub Release already exists by the time
+    # tauri-action looks for it to attach bundles to, avoiding two jobs
+    # racing to create the same tag's release.
+    needs: binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev patchelf
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false

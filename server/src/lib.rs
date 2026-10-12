@@ -11,6 +11,7 @@ use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
+use tower_http::cors::CorsLayer;
 
 use config::Config;
 use state::{new_app_state, AppState};
@@ -40,6 +41,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/gateway", get(handlers::gateway::gateway_upgrade))
         .route("/api/v1/voice/status", get(handlers::voice::voice_status))
+        // Permissive by design: this REST+WS API is meant to be called by any
+        // client (the bundled web UI, the desktop app, the CLI, third-party
+        // clients) from any origin, same as Discord's own public API is.
+        // There's no cookie-based auth to protect against CSRF here — every
+        // request carries its own bearer token.
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 

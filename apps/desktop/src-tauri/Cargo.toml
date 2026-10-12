@@ -1,0 +1,18 @@
+[package]
+name = "dissedoff-desktop"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+description = "Native desktop client shell for Dissedoff (Linux/macOS/Windows) — a thin Tauri wrapper around the same web UI served by the server itself, so a user who wants a standalone app doesn't need to open a browser."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "dissedoff-desktop"
+path = "src/main.rs"

@@ -6,12 +6,13 @@ members = [
     "crates/permissions",
     "crates/client-core",
     "apps/cli",
+    "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
 edition = "2021"
 license = "AGPL-3.0-or-later"
-repository = "https://example.invalid/dissedoff"
+repository = "https://github.com/bushibot/dissedoff"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
