@@ -12,6 +12,12 @@ name: Release
 # means Gatekeeper/SmartScreen will warn on first launch; this is a known,
 # documented limitation, not a build bug.
 
+# Before tagging a release, bump the version in
+# apps/desktop/src-tauri/Cargo.toml to match — the desktop bundle filenames
+# (Dissedoff_X.Y.Z_*.{AppImage,deb,dmg,exe}) come from there, not from the
+# git tag, and will silently keep the old version string otherwise (as
+# happened in v0.1.1, where the bundles were still named "0.1.0").
+
 on:
   push:
     tags:
