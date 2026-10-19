@@ -18,6 +18,7 @@
   .card button { width: 100%; padding: 0.55rem; background: var(--accent); border: none; border-radius: 4px; color: white; cursor: pointer; font-weight: 600; }
   .card button:hover { opacity: 0.9; }
   .card .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
+  .card input.input-error { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
   .card .switch { text-align: center; margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
   #app { display: none; height: 100vh; }
   .layout { display: flex; height: 100%; }
@@ -31,6 +32,14 @@
   .channel:hover { background: var(--panel-2); }
   .new-channel { display: flex; gap: 0.3rem; padding: 0.5rem; }
   .new-channel input { flex: 1; min-width: 0; padding: 0.35rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.85rem; }
+  .new-channel input.input-error { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); animation: shake 0.3s; }
+  @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+  .new-channel select { padding: 0.3rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.78rem; }
+  .voice-panel { flex: 1; overflow-y: auto; }
+  .voice-panel .box { padding: 1.5rem; color: var(--muted); max-width: 440px; line-height: 1.5; }
+  .voice-panel .box h2 { color: var(--text); font-size: 1.05rem; margin: 0 0 0.6rem; }
+  .voice-panel .box code { display: block; background: var(--panel-2); padding: 0.5rem 0.7rem; border-radius: 4px; font-size: 0.95rem; margin: 0.6rem 0; color: var(--text); }
+  .voice-panel .box a { color: var(--accent); }
   .new-channel button { padding: 0.35rem 0.5rem; background: var(--accent); border: none; border-radius: 4px; color: white; cursor: pointer; }
   .voice-status { padding: 0.6rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--muted); }
   .voice-status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.35rem; }
@@ -72,6 +81,10 @@
       <div class="channels" id="channel-list"></div>
       <div class="new-channel">
         <input id="new-channel-name" placeholder="new channel" />
+        <select id="new-channel-kind">
+          <option value="text"># text</option>
+          <option value="voice">&#128266; voice</option>
+        </select>
         <button id="new-channel-submit">+</button>
       </div>
       <div class="voice-status" id="voice-status">voice: checking...</div>
@@ -84,7 +97,8 @@
       <div class="main-header" id="main-header">#</div>
       <div class="banner hidden" id="banner"></div>
       <div class="messages" id="messages"></div>
-      <div class="composer">
+      <div class="voice-panel hidden" id="voice-panel"></div>
+      <div class="composer" id="composer">
         <input id="composer-input" placeholder="Message..." autocomplete="off" />
         <button id="composer-send">Send</button>
       </div>
@@ -124,21 +138,72 @@
 
   function showAuthError(msg) { el('auth-error').textContent = msg || ''; }
 
+  // Field-level error highlight: marks exactly which input is at fault,
+  // rather than leaving the user to guess from a one-line message above
+  // three fields. Cleared on the next edit to that field.
+  function markFieldError(input) { input.classList.add('input-error'); }
+  function clearFieldErrors() {
+    el('auth-server').classList.remove('input-error');
+    el('auth-password').classList.remove('input-error');
+  }
+  el('auth-server').addEventListener('input', () => el('auth-server').classList.remove('input-error'));
+  el('auth-password').addEventListener('input', () => el('auth-password').classList.remove('input-error'));
+
+  // Users routinely type "192.168.1.99:8080" or "myhost.local" without a
+  // scheme. Browsers' URL parser then reads the leading digits/host as an
+  // invalid scheme and throws a cryptic "string did not match the expected
+  // pattern" TypeError — technically correct, useless to a human. Default
+  // to http:// (self-hosted Dissedoff servers aren't expected to have a
+  // cert) instead of surfacing that error, same as most browsers' own
+  // address bar does for bare host:port input.
+  function normalizeServerUrl(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    return withScheme.replace(/\/+$/, '');
+  }
+
   el('auth-switch').addEventListener('click', () => {
     state.mode = state.mode === 'login' ? 'register' : 'login';
     el('auth-title').textContent = state.mode === 'login' ? 'Sign in to Dissedoff' : 'Register a new account';
     el('auth-submit').textContent = state.mode === 'login' ? 'Sign in' : 'Register';
     el('auth-switch').textContent = state.mode === 'login' ? 'Need an account? Register instead' : 'Already have an account? Sign in';
     showAuthError('');
+    clearFieldErrors();
   });
 
   el('auth-submit').addEventListener('click', async () => {
     showAuthError('');
-    const serverUrl = el('auth-server').value.trim() || state.serverUrl;
+    clearFieldErrors();
+    const rawServer = el('auth-server').value.trim() || state.serverUrl;
     const username = el('auth-username').value.trim();
     const password = el('auth-password').value;
-    if (password.length < 8) { showAuthError('password must be at least 8 characters'); return; }
-    state.serverUrl = serverUrl.replace(/\/$/, '');
+
+    const normalized = normalizeServerUrl(rawServer);
+    if (!normalized) {
+      showAuthError('Server URL is required — e.g. http://127.0.0.1:8080');
+      markFieldError(el('auth-server'));
+      el('auth-server').focus();
+      return;
+    }
+    let parsed;
+    try {
+      parsed = new URL(normalized);
+    } catch (_) {
+      showAuthError(`"${rawServer}" doesn't look like a valid server address — try something like http://192.168.1.99:8080`);
+      markFieldError(el('auth-server'));
+      el('auth-server').focus();
+      return;
+    }
+    if (password.length < 8) {
+      showAuthError('Password must be at least 8 characters');
+      markFieldError(el('auth-password'));
+      el('auth-password').focus();
+      return;
+    }
+
+    state.serverUrl = parsed.origin;
+    el('auth-server').value = state.serverUrl; // reflect any auto-correction (e.g. added http://) back to the user
     try {
       const path = state.mode === 'login' ? '/api/v1/auth/login' : '/api/v1/auth/register';
       const body = state.mode === 'login'
@@ -152,7 +217,8 @@
       localStorage.setItem('dissedoff_username', state.username);
       enterApp();
     } catch (e) {
-      showAuthError(e.message);
+      showAuthError(`Could not reach ${state.serverUrl} — ${e.message}`);
+      markFieldError(el('auth-server'));
     }
   });
 
@@ -185,6 +251,7 @@
   async function loadVoiceStatus() {
     try {
       const v = await api('/api/v1/voice/status');
+      state.voicePort = v.port;
       const dot = v.enabled && v.running ? '#43b581' : v.enabled ? '#e0a040' : '#72767d';
       el('voice-status').innerHTML = `<span class="dot" style="background:${dot}"></span>voice: ${v.enabled ? (v.running ? `running on port ${v.port}` : 'starting...') : 'disabled'}`;
     } catch (e) {
@@ -204,18 +271,31 @@
     state.channels.forEach((c) => {
       const div = document.createElement('div');
       div.className = 'channel' + (state.activeChannel && c.id === state.activeChannel.id ? ' active' : '');
-      div.textContent = '# ' + c.name;
+      div.textContent = (c.kind === 'voice' ? '\u{1F50A} ' : '# ') + c.name;
       div.addEventListener('click', () => { state.activeChannel = c; refreshChannelView(); });
       list.appendChild(div);
     });
   }
 
+  el('new-channel-name').addEventListener('input', () => el('new-channel-name').classList.remove('input-error'));
+  el('new-channel-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('new-channel-submit').click(); });
+
   el('new-channel-submit').addEventListener('click', async () => {
     const input = el('new-channel-name');
     const name = input.value.trim();
-    if (!name) return;
+    if (!name) {
+      input.focus();
+      input.classList.add('input-error');
+      // restart the shake animation on repeat clicks (CSS animations don't
+      // replay on an unchanged class unless it's removed and re-added)
+      input.classList.remove('input-error');
+      void input.offsetWidth;
+      input.classList.add('input-error');
+      return;
+    }
+    const kind = el('new-channel-kind').value;
     try {
-      await api('/api/v1/channels', { method: 'POST', body: JSON.stringify({ name, kind: 'text' }) });
+      await api('/api/v1/channels', { method: 'POST', body: JSON.stringify({ name, kind }) });
       input.value = '';
       await loadChannels();
       refreshChannelView();
@@ -242,12 +322,45 @@
     if (!state.activeChannel) {
       el('main-header').textContent = 'no channel selected';
       el('messages').innerHTML = '';
+      el('voice-panel').classList.add('hidden');
+      el('messages').classList.remove('hidden');
+      el('composer').classList.remove('hidden');
       return;
     }
-    el('main-header').textContent = '# ' + state.activeChannel.name;
+    const isVoice = state.activeChannel.kind === 'voice';
+    el('main-header').textContent = (isVoice ? '\u{1F50A} ' : '# ') + state.activeChannel.name;
     document.querySelectorAll('.channel').forEach((d, i) => {
       d.classList.toggle('active', state.channels[i] && state.channels[i].id === state.activeChannel.id);
     });
+
+    if (isVoice) {
+      // Dissedoff's bundled Murmur voice server has no in-app join yet (see
+      // PLAN.md Phase 2: the control-API proxy / VoiceStateUpdate bridging
+      // that would let a click here actually connect audio doesn't exist).
+      // Showing a fake "Join" button that does nothing would be worse than
+      // this: give the real connection details for any standard Mumble
+      // client instead, so voice is at least usable today.
+      el('messages').classList.add('hidden');
+      el('composer').classList.add('hidden');
+      const panel = el('voice-panel');
+      panel.classList.remove('hidden');
+      let host = 'your-server';
+      try { host = new URL(state.serverUrl).hostname; } catch (_) {}
+      const port = state.voicePort || '64738';
+      panel.innerHTML = `<div class="box">
+        <h2>&#128266; ${escapeHtml(state.activeChannel.name)}</h2>
+        <p>Dissedoff can't join voice in-browser/in-app yet &mdash; that bridging isn't built.
+        Connect with any Mumble client instead, pointed at this server's bundled voice server:</p>
+        <code>${escapeHtml(host)}:${escapeHtml(String(port))}</code>
+        <p>Get a Mumble client: <a href="https://www.mumble.info/downloads/" target="_blank" rel="noopener">mumble.info/downloads</a></p>
+      </div>`;
+      banner('');
+      return;
+    }
+
+    el('voice-panel').classList.add('hidden');
+    el('messages').classList.remove('hidden');
+    el('composer').classList.remove('hidden');
     try {
       const history = await api(`/api/v1/channels/${state.activeChannel.id}/messages`);
       const box = el('messages');
