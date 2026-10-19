@@ -8,9 +8,11 @@ command with a verifiable outcome.
 ## 1. Prerequisites
 
 - Docker, reachable by whoever runs these commands (`docker version` succeeds).
-- Network access to pull `rust:1-slim` and `debian:stable-slim` base images the
-  first time (the server image isn't published to a registry yet — see
-  [Current limitation](#current-limitation) below).
+- Network access to pull `ghcr.io/bushibot/dissedoff:latest` (a published image
+  exists as of v0.1.0 — see [Releases](https://github.com/bushibot/dissedoff/releases)).
+  No local checkout or build is needed; `install.sh` only falls back to a local
+  `docker build` if the pull fails (e.g. offline, or pinning an unpublished
+  `DISSEDOFF_IMAGE`).
 
 ## 2. Start the server
 
@@ -84,22 +86,20 @@ curl -s -X POST "http://localhost:8080/api/v1/channels/$CHANNEL_ID/messages" \
   -d '{"content":"hello from a script"}'
 ```
 
-## 6. Use the web UI
+## 6. Use the web UI, or a native desktop client
 
 Open `http://<host>:8080/` in a browser. It's a single static page baked
 into the server binary (`server/web/app.html`) — sign in with the account
 created in step 4. No separate client install is needed for basic chat/admin
-use; dedicated desktop/mobile clients are a separate, not-yet-built phase
-(see `PLAN.md`).
+use.
 
-## Current limitation
+A native desktop app (`dissedoff-desktop`, Tauri) is also published per
+release for Linux (`.AppImage`/`.deb`), macOS (`.dmg`), and Windows
+(`.exe`) — same UI, as a standalone app instead of a browser tab. Grab it
+from the [Releases page](https://github.com/bushibot/dissedoff/releases).
+Mobile (Android/iOS) is a separate, not-yet-built phase (see `PLAN.md`).
 
-No prebuilt image is published to a registry yet, so `install.sh` falls back
-to building the image locally from the Dockerfile in the current directory
-if the pull fails. That means, for now, this script must be run from inside
-a checkout of this repository (so `./Dockerfile` exists), not from an
-arbitrary empty directory. The GitHub Actions release workflow
-(`.github/workflows/release.yml`) will publish real images and binaries to
-GitHub Releases / GHCR once a version is tagged — check the repo's Releases
-page first; if one exists, `DISSEDOFF_IMAGE` can point at it directly and no
-local checkout is needed.
+As of v0.2.0, the client (web and desktop) supports connecting to and
+switching between multiple independent Dissedoff servers from one session —
+each is its own saved account, since there's no shared identity across
+deployments.
