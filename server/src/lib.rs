@@ -8,7 +8,7 @@ pub mod state;
 pub mod voice;
 
 use axum::response::Html;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde_json::json;
 use tower_http::cors::CorsLayer;
@@ -36,8 +36,20 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::channels::list_channels).post(handlers::channels::create_channel),
         )
         .route(
+            "/api/v1/channels/:channel_id",
+            patch(handlers::channels::update_channel).delete(handlers::channels::delete_channel),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/typing",
+            post(handlers::channels::typing_start),
+        )
+        .route(
             "/api/v1/channels/:channel_id/messages",
             get(handlers::channels::list_messages).post(handlers::channels::create_message),
+        )
+        .route(
+            "/api/v1/channels/:channel_id/messages/:message_id",
+            patch(handlers::channels::update_message).delete(handlers::channels::delete_message),
         )
         .route("/api/v1/gateway", get(handlers::gateway::gateway_upgrade))
         .route("/api/v1/voice/status", get(handlers::voice::voice_status))

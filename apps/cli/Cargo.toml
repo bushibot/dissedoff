@@ -1,6 +1,6 @@
 [package]
 name = "dissedoff-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license = "Apache-2.0"
 description = "A terminal reference client for Dissedoff — proves client-core end to end without requiring a GUI toolchain, and doubles as a usable text client for headless/SSH use."

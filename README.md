@@ -14,8 +14,18 @@ macOS and Windows desktop builds are wired into CI but not yet run/tested by a h
 OSes. No multi-person usage has happened yet (all verification so far is one operator against a
 real server, plus one fully automated two-account test).
 
+**v0.2.0** adds: rename/delete a channel and edit/delete a message (right-click in either UI),
+a typing indicator, and — the bigger one — switching between multiple independently-run Dissedoff
+servers from one client via a left-hand server rail, Discord-style (each is its own account, since
+there's no shared identity across deployments yet). All six new REST endpoints were exercised
+against the live running server, not just unit-tested, and a new automated e2e test
+(`channel_and_message_management_with_live_gateway_events`) locks in both the happy path and the
+permission-denial path (a non-owner/non-author gets a real 403, not just a client-side hide) for
+every one of them, propagated over the gateway to a second connected client.
+
 A tagged release, **v0.1.0**, is published with a real pulled-and-run GHCR image and
 Linux/macOS/Windows server+CLI binaries: https://github.com/bushibot/dissedoff/releases/tag/v0.1.0
+(**v0.2.0** supersedes it with the features above — see the Releases page for the current tag).
 
 Full architecture, licensing rationale, voice/federation design, and the phased roadmap (with
 per-phase status) live in [`PLAN.md`](./PLAN.md).
@@ -89,7 +99,7 @@ Requires a Rust toolchain (stable, 2021 edition workspace). From the repo root:
 
 ```sh
 cargo build --workspace
-cargo test --workspace            # 11 tests, including a full register→chat→receive e2e test
+cargo test --workspace            # 8 tests, including 2 full e2e tests against a real running server
 cargo run -p dissedoff-server     # self-contained: creates /data, bootstraps roles, generates
                                    # its own salt + (if voice enabled) Murmur cert, on first run
 cargo run -p dissedoff-cli -- http://127.0.0.1:8080   # terminal client
@@ -125,9 +135,20 @@ the release page. Along the way this caught and fixed a real bug — the Dockerf
 updated when `apps/cli` joined the workspace, so the image build was silently broken until this
 round of work.
 
-Still open (tracked in the plan's roadmap, not silently dropped): proxying Murmur's Ice control
-interface through Dissedoff's own permission engine and `VoiceStateUpdate` events (so a client can
-actually *join* voice through Dissedoff, not just see that it's running); federation; Android/iOS
+Also real as of v0.2.0: channel rename/delete and message edit/delete, each with a right-click
+context menu in both UI copies and a server-side permission check that's actually enforced (not
+just hidden client-side — a 403 from a non-owner/non-author is covered by an automated test); a
+typing indicator over the gateway; and switching between multiple independently-run servers from
+one client (a left-hand server rail, each entry its own saved account). All exercised against the
+live running server with real curl calls before being called done, in addition to the new
+automated e2e test.
+
+Still open (tracked in the plan's roadmap, not silently dropped): the right-click menus always
+show rename/delete regardless of whether the viewer actually has permission — the server still
+rejects it correctly, but the UI doesn't yet hide actions you can't take; proxying Murmur's Ice
+control interface through Dissedoff's own permission engine and `VoiceStateUpdate` events (so a
+client can actually *join* voice through Dissedoff, not just see that it's running — the voice
+channel panel currently just hands you external Mumble connection info); federation; Android/iOS
 clients (see `PLAN.md` Phase 4 Mobile, not started — needs a separate mobile SDK/NDK toolchain);
 push-to-talk/overlay (needs the native helper process described in `PLAN.md`, not built — the
 desktop app today is a plain webview, same limitations as the browser); macOS/Windows desktop

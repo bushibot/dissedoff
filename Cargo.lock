@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "dissedoff-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dissedoff-client-core",
  "dissedoff-protocol",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "dissedoff-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "dissedoff-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "axum",

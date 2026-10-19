@@ -136,6 +136,186 @@ async fn two_users_register_and_chat_with_zero_manual_config() {
     assert_eq!(messages[0]["content"], "hello from alice");
 }
 
+/// Covers the v0.2.0 management endpoints (rename/delete channel, edit/
+/// delete message, typing) end to end against a real running server,
+/// including that each one's permission check actually rejects a
+/// non-owner/non-author, and that each one's gateway event actually
+/// reaches a second connected client in real time (not just a 200/204).
+#[tokio::test]
+async fn channel_and_message_management_with_live_gateway_events() {
+    let addr = spawn_test_server().await;
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+
+    let alice: Value = client
+        .post(format!("{base}/api/v1/auth/register"))
+        .json(&json!({ "username": "alice", "password": "correct-horse-battery" }))
+        .send()
+        .await
+        .expect("register alice")
+        .json()
+        .await
+        .expect("parse alice register response");
+    let alice_token = alice["token"].as_str().expect("alice token").to_string();
+
+    let bob: Value = client
+        .post(format!("{base}/api/v1/auth/register"))
+        .json(&json!({ "username": "bob", "password": "correct-horse-battery" }))
+        .send()
+        .await
+        .expect("register bob")
+        .json()
+        .await
+        .expect("parse bob register response");
+    let bob_token = bob["token"].as_str().expect("bob token").to_string();
+
+    let channel: Value = client
+        .post(format!("{base}/api/v1/channels"))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "name": "general", "kind": "text" }))
+        .send()
+        .await
+        .expect("alice create channel request")
+        .json()
+        .await
+        .expect("parse channel response");
+    let channel_id = channel["id"].as_str().expect("channel id").to_string();
+
+    let ws_url = format!("ws://{addr}/api/v1/gateway?token={bob_token}");
+    let (mut ws, _resp) = tokio_tungstenite::connect_async(ws_url)
+        .await
+        .expect("bob connects to gateway");
+    assert_eq!(next_envelope(&mut ws).await["t"], "HELLO");
+    assert_eq!(next_envelope(&mut ws).await["t"], "READY");
+
+    // Rename: non-owner rejected, owner succeeds, event reaches bob.
+    let bob_rename = client
+        .patch(format!("{base}/api/v1/channels/{channel_id}"))
+        .bearer_auth(&bob_token)
+        .json(&json!({ "name": "nope" }))
+        .send()
+        .await
+        .expect("bob rename request");
+    assert_eq!(bob_rename.status(), 403);
+
+    let renamed: Value = client
+        .patch(format!("{base}/api/v1/channels/{channel_id}"))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "name": "renamed-general" }))
+        .send()
+        .await
+        .expect("alice rename request")
+        .json()
+        .await
+        .expect("parse rename response");
+    assert_eq!(renamed["name"], "renamed-general");
+    let update_event = next_envelope(&mut ws).await;
+    assert_eq!(update_event["t"], "CHANNEL_UPDATE");
+    assert_eq!(update_event["d"]["name"], "renamed-general");
+
+    // Typing: reaches the other connected client with the sender's username.
+    client
+        .post(format!("{base}/api/v1/channels/{channel_id}/typing"))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .expect("alice typing request");
+    let typing_event = next_envelope(&mut ws).await;
+    assert_eq!(typing_event["t"], "TYPING_START");
+    assert_eq!(typing_event["d"]["username"], "alice");
+
+    // Post, then edit: author can, edited_at gets set, event reaches bob.
+    let posted: Value = client
+        .post(format!("{base}/api/v1/channels/{channel_id}/messages"))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "content": "origonal typo" }))
+        .send()
+        .await
+        .expect("alice post message")
+        .json()
+        .await
+        .expect("parse message response");
+    let message_id = posted["id"].as_str().expect("message id").to_string();
+    assert!(posted["edited_at"].is_null());
+    assert_eq!(next_envelope(&mut ws).await["t"], "MESSAGE_CREATE");
+
+    let bob_edit = client
+        .patch(format!("{base}/api/v1/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&bob_token)
+        .json(&json!({ "content": "bob butting in" }))
+        .send()
+        .await
+        .expect("bob edit request");
+    assert_eq!(bob_edit.status(), 403, "non-author must not edit another user's message");
+
+    let edited: Value = client
+        .patch(format!("{base}/api/v1/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "content": "original, fixed" }))
+        .send()
+        .await
+        .expect("alice edit request")
+        .json()
+        .await
+        .expect("parse edit response");
+    assert_eq!(edited["content"], "original, fixed");
+    assert!(edited["edited_at"].is_number(), "edited_at must be set after an edit");
+    let update_msg_event = next_envelope(&mut ws).await;
+    assert_eq!(update_msg_event["t"], "MESSAGE_UPDATE");
+    assert_eq!(update_msg_event["d"]["content"], "original, fixed");
+
+    // Delete: non-author rejected, author succeeds, event reaches bob.
+    let bob_delete_msg = client
+        .delete(format!("{base}/api/v1/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&bob_token)
+        .send()
+        .await
+        .expect("bob delete message request");
+    assert_eq!(bob_delete_msg.status(), 403);
+
+    let alice_delete_msg = client
+        .delete(format!("{base}/api/v1/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .expect("alice delete message request");
+    assert_eq!(alice_delete_msg.status(), 204);
+    let delete_msg_event = next_envelope(&mut ws).await;
+    assert_eq!(delete_msg_event["t"], "MESSAGE_DELETE");
+    assert_eq!(delete_msg_event["d"]["id"], message_id);
+
+    // Delete channel: non-owner rejected, owner succeeds, event reaches bob.
+    let bob_delete_channel = client
+        .delete(format!("{base}/api/v1/channels/{channel_id}"))
+        .bearer_auth(&bob_token)
+        .send()
+        .await
+        .expect("bob delete channel request");
+    assert_eq!(bob_delete_channel.status(), 403);
+
+    let alice_delete_channel = client
+        .delete(format!("{base}/api/v1/channels/{channel_id}"))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .expect("alice delete channel request");
+    assert_eq!(alice_delete_channel.status(), 204);
+    let delete_channel_event = next_envelope(&mut ws).await;
+    assert_eq!(delete_channel_event["t"], "CHANNEL_DELETE");
+    assert_eq!(delete_channel_event["d"]["id"], channel_id);
+
+    let remaining: Value = client
+        .get(format!("{base}/api/v1/channels"))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .expect("list channels")
+        .json()
+        .await
+        .expect("parse channels response");
+    assert_eq!(remaining.as_array().expect("array").len(), 0);
+}
+
 async fn next_envelope(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,

@@ -134,6 +134,19 @@ standard workaround and directly unblocks "charge a few bucks for the iOS client
    browser. The "two people" exit criterion has only been exercised as one operator running
    multiple accounts/processes, plus one fully automated two-account test — not by two actual
    separate people yet.**
+
+   **v0.2.0 additions:** channel rename/delete, message edit/delete (with an "(edited)" marker),
+   and a typing indicator are now real REST endpoints + gateway events (`CHANNEL_UPDATE`,
+   `CHANNEL_DELETE`, `MESSAGE_UPDATE`, `MESSAGE_DELETE`, `TYPING_START`), wired into both UI
+   copies with right-click context menus on channels and messages. The client also supports
+   multiple independent server connections (a left-hand server rail, Discord-style) — each one
+   its own account, since there's no shared identity across deployments yet; switching between
+   them re-points the REST/WS connection without a page reload. All six new endpoints were
+   smoke-tested against the live running server (create/rename/delete channel, edit/delete
+   message, typing), not just compiled. Right-click delete/rename always shows in the UI
+   regardless of the viewer's actual permissions — the server still enforces `MANAGE_CHANNELS`/
+   `MANAGE_MESSAGES`/message-ownership and a non-owner gets a 403 surfaced as a banner; a
+   permission-aware UI that hides actions you can't take isn't built yet.
 2. **Voice integration** — Murmur supervisor, auto-cert/config, control-API proxy, voice UI. Exit:
    join voice with zero Mumble-specific setup, ever.
    **Status: partial. Murmur runs embedded, auto-configures certs/config, and crash-restarts —

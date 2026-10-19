@@ -3,7 +3,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use dissedoff_permissions::Permissions;
 use dissedoff_protocol::rest::{
-    ChannelResponse, CreateChannelRequest, CreateMessageRequest, ListMessagesQuery, MessageResponse,
+    ChannelDeletedEvent, ChannelResponse, CreateChannelRequest, CreateMessageRequest,
+    ListMessagesQuery, MessageDeletedEvent, MessageResponse, TypingStartEvent,
+    UpdateChannelRequest, UpdateMessageRequest,
 };
 use dissedoff_protocol::{Envelope, EventType};
 
@@ -76,6 +78,106 @@ pub async fn create_channel(
     Ok(Json(response))
 }
 
+pub async fn update_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<String>,
+    Json(req): Json<UpdateChannelRequest>,
+) -> Result<Json<ChannelResponse>, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
+    let user = authenticate(&state, &headers).await.map_err(auth_error_response)?;
+    if !user.permissions.contains(Permissions::MANAGE_CHANNELS) {
+        return Err(api_error(StatusCode::FORBIDDEN, "missing_permission", "requires MANAGE_CHANNELS"));
+    }
+    let Some(name) = req.name.as_ref().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) else {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_name", "name must not be empty"));
+    };
+
+    let row: Option<(String, String, Option<String>, i32)> =
+        sqlx::query_as("SELECT name, kind, parent_id, position FROM channels WHERE id = ?")
+            .bind(&channel_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+    let Some((_, kind, parent_id, position)) = row else {
+        return Err(api_error(StatusCode::NOT_FOUND, "channel_not_found", "no such channel"));
+    };
+
+    sqlx::query("UPDATE channels SET name = ? WHERE id = ?")
+        .bind(&name)
+        .bind(&channel_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+
+    let response = ChannelResponse { id: channel_id, name, kind, parent_id, position };
+    let _ = state.broadcast.send(Envelope {
+        t: EventType::ChannelUpdate,
+        seq: 0,
+        d: serde_json::to_value(&response).unwrap_or_default(),
+    });
+    Ok(Json(response))
+}
+
+pub async fn delete_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
+    let user = authenticate(&state, &headers).await.map_err(auth_error_response)?;
+    if !user.permissions.contains(Permissions::MANAGE_CHANNELS) {
+        return Err(api_error(StatusCode::FORBIDDEN, "missing_permission", "requires MANAGE_CHANNELS"));
+    }
+
+    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM channels WHERE id = ?")
+        .bind(&channel_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+    if exists.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "channel_not_found", "no such channel"));
+    }
+
+    // No ON DELETE CASCADE on messages.channel_id (see 0001_init.sql) — clear
+    // messages first so the FK reference never dangles, even transiently.
+    sqlx::query("DELETE FROM messages WHERE channel_id = ?")
+        .bind(&channel_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+    sqlx::query("DELETE FROM channels WHERE id = ?")
+        .bind(&channel_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+
+    let _ = state.broadcast.send(Envelope {
+        t: EventType::ChannelDelete,
+        seq: 0,
+        d: serde_json::to_value(&ChannelDeletedEvent { id: channel_id }).unwrap_or_default(),
+    });
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn typing_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
+    let user = authenticate(&state, &headers).await.map_err(auth_error_response)?;
+    if !user.permissions.contains(Permissions::SEND_MESSAGES) {
+        return Err(api_error(StatusCode::FORBIDDEN, "missing_permission", "requires SEND_MESSAGES"));
+    }
+    // Ephemeral — no DB write. Purely a live gateway broadcast so other
+    // members' clients can show "<user> is typing...", same as the event
+    // name's only purpose.
+    let _ = state.broadcast.send(Envelope {
+        t: EventType::TypingStart,
+        seq: 0,
+        d: serde_json::to_value(&TypingStartEvent { channel_id, username: user.username }).unwrap_or_default(),
+    });
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn list_messages(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -88,9 +190,9 @@ pub async fn list_messages(
     }
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
-    let rows: Vec<(String, String, String, String, i64)> = if let Some(before) = &query.before {
+    let rows: Vec<(String, String, String, String, i64, Option<i64>)> = if let Some(before) = &query.before {
         sqlx::query_as(
-            "SELECT m.id, m.author_internal_id, u.username, m.content, m.created_at
+            "SELECT m.id, m.author_internal_id, u.username, m.content, m.created_at, m.edited_at
              FROM messages m JOIN users u ON u.internal_id = m.author_internal_id
              WHERE m.channel_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?",
         )
@@ -101,7 +203,7 @@ pub async fn list_messages(
         .await
     } else {
         sqlx::query_as(
-            "SELECT m.id, m.author_internal_id, u.username, m.content, m.created_at
+            "SELECT m.id, m.author_internal_id, u.username, m.content, m.created_at, m.edited_at
              FROM messages m JOIN users u ON u.internal_id = m.author_internal_id
              WHERE m.channel_id = ? ORDER BY m.id DESC LIMIT ?",
         )
@@ -114,7 +216,7 @@ pub async fn list_messages(
 
     let messages = rows
         .into_iter()
-        .map(|(id, author_internal_id, username, content, created_at)| {
+        .map(|(id, author_internal_id, username, content, created_at, edited_at)| {
             let author_uuid = uuid::Uuid::parse_str(&author_internal_id).unwrap_or_default();
             MessageResponse {
                 id,
@@ -123,6 +225,7 @@ pub async fn list_messages(
                 author_username: username,
                 content,
                 created_at,
+                edited_at,
             }
         })
         .collect();
@@ -172,6 +275,7 @@ pub async fn create_message(
         author_username: user.username.clone(),
         content: req.content,
         created_at,
+        edited_at: None,
     };
 
     let _ = state.broadcast.send(Envelope {
@@ -181,4 +285,93 @@ pub async fn create_message(
     });
 
     Ok(Json(response))
+}
+
+pub async fn update_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((channel_id, message_id)): Path<(String, String)>,
+    Json(req): Json<UpdateMessageRequest>,
+) -> Result<Json<MessageResponse>, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
+    let user = authenticate(&state, &headers).await.map_err(auth_error_response)?;
+    if req.content.trim().is_empty() || req.content.len() > 4000 {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_content", "content must be 1-4000 characters"));
+    }
+
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT author_internal_id, created_at FROM messages WHERE id = ? AND channel_id = ?")
+            .bind(&message_id)
+            .bind(&channel_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+    let Some((author_internal_id, created_at)) = row else {
+        return Err(api_error(StatusCode::NOT_FOUND, "message_not_found", "no such message"));
+    };
+    let is_author = author_internal_id == user.internal_id.to_string();
+    if !is_author && !user.permissions.contains(Permissions::MANAGE_MESSAGES) {
+        return Err(api_error(StatusCode::FORBIDDEN, "missing_permission", "can only edit your own messages"));
+    }
+
+    let edited_at = now_unix();
+    sqlx::query("UPDATE messages SET content = ?, edited_at = ? WHERE id = ?")
+        .bind(&req.content)
+        .bind(edited_at)
+        .bind(&message_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+
+    let author_uuid = uuid::Uuid::parse_str(&author_internal_id).unwrap_or_default();
+    let response = MessageResponse {
+        id: message_id,
+        channel_id,
+        author_public_id: public_user_id(&state.salt, author_uuid),
+        author_username: user.username.clone(),
+        content: req.content,
+        created_at,
+        edited_at: Some(edited_at),
+    };
+    let _ = state.broadcast.send(Envelope {
+        t: EventType::MessageUpdate,
+        seq: 0,
+        d: serde_json::to_value(&response).unwrap_or_default(),
+    });
+    Ok(Json(response))
+}
+
+pub async fn delete_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((channel_id, message_id)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, Json<dissedoff_protocol::ApiError>)> {
+    let user = authenticate(&state, &headers).await.map_err(auth_error_response)?;
+
+    let author_internal_id: Option<String> =
+        sqlx::query_scalar("SELECT author_internal_id FROM messages WHERE id = ? AND channel_id = ?")
+            .bind(&message_id)
+            .bind(&channel_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+    let Some(author_internal_id) = author_internal_id else {
+        return Err(api_error(StatusCode::NOT_FOUND, "message_not_found", "no such message"));
+    };
+    let is_author = author_internal_id == user.internal_id.to_string();
+    if !is_author && !user.permissions.contains(Permissions::MANAGE_MESSAGES) {
+        return Err(api_error(StatusCode::FORBIDDEN, "missing_permission", "can only delete your own messages"));
+    }
+
+    sqlx::query("DELETE FROM messages WHERE id = ?")
+        .bind(&message_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "db error"))?;
+
+    let _ = state.broadcast.send(Envelope {
+        t: EventType::MessageDelete,
+        seq: 0,
+        d: serde_json::to_value(&MessageDeletedEvent { id: message_id, channel_id }).unwrap_or_default(),
+    });
+    Ok(StatusCode::NO_CONTENT)
 }

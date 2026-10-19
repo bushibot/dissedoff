@@ -53,6 +53,16 @@ pub struct CreateChannelRequest {
     pub kind: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateChannelRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelDeletedEvent {
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageResponse {
     pub id: String,
@@ -61,11 +71,30 @@ pub struct MessageResponse {
     pub author_username: String,
     pub content: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub edited_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMessageRequest {
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageDeletedEvent {
+    pub id: String,
+    pub channel_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypingStartEvent {
+    pub channel_id: String,
+    pub username: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
